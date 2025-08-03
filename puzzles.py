@@ -211,11 +211,12 @@ def add_spec(x: Float32[32,]) -> Float32[32,]:
 
 
 @triton.jit
-def add_kernel(x_ptr, z_ptr, N0, B0: tl.constexpr):
+def add_kernel(x_ptr, z_ptr, N0: tl.constexpr, B0: tl.constexpr):
     # We name the offsets of the pointers as "off_"
-    off_x = tl.arange(0, B0)
+    off_x = tl.arange(0, N0)
     x = tl.load(x_ptr + off_x)
-    # Finish me!
+    x = x + 10.0
+    tl.store(z_ptr + off_x, x)
     return
 
 
@@ -236,7 +237,12 @@ def add2_spec(x: Float32[200,]) -> Float32[200,]:
 
 @triton.jit
 def add_mask2_kernel(x_ptr, z_ptr, N0, B0: tl.constexpr):
-    # Finish me!
+    block_id = tl.program_id(0)
+    off_x = block_id * B0 + tl.arange(0, B0)
+    mask_x = off_x < N0
+    x = tl.load(x_ptr + off_x, mask = mask_x)
+    x = x + 10.0
+    tl.store(z_ptr + off_x, x, mask = mask_x)
     return
 
 
@@ -258,8 +264,14 @@ def add_vec_spec(x: Float32[32,], y: Float32[32,]) -> Float32[32, 32]:
 
 
 @triton.jit
-def add_vec_kernel(x_ptr, y_ptr, z_ptr, N0, N1, B0: tl.constexpr, B1: tl.constexpr):
-    # Finish me!
+def add_vec_kernel(x_ptr, y_ptr, z_ptr, N0: tl.constexpr, N1: tl.constexpr , B0: tl.constexpr, B1: tl.constexpr):
+    off_x = tl.arange(0, N0)
+    off_y = tl.arange(0, N1)
+    off_z = off_y[:, None] * N0 + off_x[None, :]
+    x = tl.load(x_ptr + off_x)
+    y = tl.load(y_ptr + off_y)
+    z = y[:, None] + x[None, :]
+    tl.store(z_ptr + off_z, z)
     return
 
 
@@ -286,7 +298,16 @@ def add_vec_block_kernel(
 ):
     block_id_x = tl.program_id(0)
     block_id_y = tl.program_id(1)
-    # Finish me!
+    off_x = block_id_x * B0 + tl.arange(0, B0)
+    off_y = block_id_y * B1 + tl.arange(0, B1)
+    mask_x = off_x < N0
+    mask_y = off_y < N1
+    x = tl.load(x_ptr + off_x, mask=mask_x)
+    y = tl.load(y_ptr + off_y, mask=mask_y)
+    off_z = off_y[:, None] * N0 + off_x[None, :]
+    mask_z = mask_y[:, None] & mask_x[None, :]
+    z = y[:, None] + x[None, :]
+    tl.store(z_ptr + off_z, z, mask=mask_z)
     return
 
 
@@ -313,7 +334,17 @@ def mul_relu_block_kernel(
 ):
     block_id_x = tl.program_id(0)
     block_id_y = tl.program_id(1)
-    # Finish me!
+    off_x = block_id_x * B0 + tl.arange(0, B0)
+    off_y = block_id_y * B1 + tl.arange(0, B1)
+    mask_x = off_x < N0
+    mask_y = off_y < N1
+    x = tl.load(x_ptr + off_x, mask=mask_x)
+    y = tl.load(y_ptr + off_y, mask=mask_y)
+    off_z = off_y[:, None] * N0 + off_x[None, :]
+    mask_z = mask_y[:, None] & mask_x[None, :]
+    z = y[:, None] * x[None, :]
+    relu_z = tl.where(z > 0, z, 0.0)
+    tl.store(z_ptr + off_z, relu_z, mask=mask_z)
     return
 
 
@@ -351,9 +382,22 @@ def mul_relu_block_back_spec(
 def mul_relu_block_back_kernel(
     x_ptr, y_ptr, dz_ptr, dx_ptr, N0, N1, B0: tl.constexpr, B1: tl.constexpr
 ):
-    block_id_i = tl.program_id(0)
-    block_id_j = tl.program_id(1)
-    # Finish me!
+    block_id_x = tl.program_id(0)
+    block_id_y = tl.program_id(1)
+    off_x = block_id_x * B0 + tl.arange(0, B0)
+    off_y = block_id_y * B1 + tl.arange(0, B1)
+    off_y_x = off_y[:, None] * N0 + off_x[None, :]
+    mask_x = off_x < N0
+    mask_y = off_y < N1
+    mask_y_x = mask_y[:, None] & mask_x[None, :]
+    x = tl.load(x_ptr + off_y_x, mask = mask_y_x)
+    y = tl.load(y_ptr + off_y, mask = mask_y)
+    dz = tl.load(dz_ptr + off_y_x, mask = mask_y_x)
+    # relu 函数对 x 求偏导
+    df = tl.where(x * y[:, None] > 0, 1.0, 0.0)
+    dxy_x = y[:, None]
+    dx = df * dxy_x * dz
+    tl.store(dx_ptr + off_y_x, dx, mask = mask_y_x)
     return
 
 
