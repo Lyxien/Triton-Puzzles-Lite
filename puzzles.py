@@ -416,13 +416,24 @@ Hint: You will need a for loop for this problem. These work and look the same as
 """
 
 
-def sum_spec(x: Float32[4, 200]) -> Float32[4,]:
-    return x.sum(1)
-
+def sum_spec(x: Float32[100, 200]) -> Float32[100, 1]:
+    y = x.sum(1)
+    return y.reshape(100, 1)
 
 @triton.jit
-def sum_kernel(x_ptr, z_ptr, N0, N1, T, B0: tl.constexpr, B1: tl.constexpr):
-    # Finish me!
+def sum_kernel(x_ptr, z_ptr, N0: tl.constexpr, N1: tl.constexpr, T: tl.constexpr, B0: tl.constexpr, B1: tl.constexpr):
+    block_id_y = tl.program_id(1)
+    off_y = block_id_y * B1 + tl.arange(0, B1)
+    mask_y = off_y < N1
+    z = tl.zeros([B1], dtype=tl.float32)
+    for id_x in tl.range(0, N0, T):
+        off_x = id_x + tl.arange(0, T)
+        off_yx = off_y[:, None] * N0 + off_x[None, :]
+        mask_x = off_x < N0
+        mask_yx = mask_y[:, None] & mask_x[None, :]
+        x = tl.load(x_ptr + off_yx, mask=mask_yx)
+        z += tl.sum(x, axis=1)
+    tl.store(z_ptr + off_y, z, mask=mask_y)
     return
 
 
@@ -749,8 +760,8 @@ def run_puzzles(args, puzzles: List[int]):
         ok = test(
             sum_kernel,
             sum_spec,
-            B={"B0": 1, "B1": 32},
-            nelem={"N0": 4, "N1": 32, "T": 200},
+            B={"B0": 32, "B1": 32},
+            nelem={"N0": 200, "N1": 100, "T": 32},
             print_log=print_log,
             device=device,
         )
