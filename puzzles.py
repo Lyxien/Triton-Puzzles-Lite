@@ -416,12 +416,12 @@ Hint: You will need a for loop for this problem. These work and look the same as
 """
 
 
-def sum_spec(x: Float32[100, 200]) -> Float32[100, 1]:
+def sum_spec_1(x: Float32[100, 200]) -> Float32[100, 1]:
     y = x.sum(1)
     return y.reshape(100, 1)
 
 @triton.jit
-def sum_kernel(x_ptr, z_ptr, N0: tl.constexpr, N1: tl.constexpr, T: tl.constexpr, B0: tl.constexpr, B1: tl.constexpr):
+def sum_kernel_1(x_ptr, z_ptr, N0: tl.constexpr, N1: tl.constexpr, T: tl.constexpr, B0: tl.constexpr, B1: tl.constexpr):
     block_id_y = tl.program_id(1)
     off_y = block_id_y * B1 + tl.arange(0, B1)
     mask_y = off_y < N1
@@ -434,6 +434,26 @@ def sum_kernel(x_ptr, z_ptr, N0: tl.constexpr, N1: tl.constexpr, T: tl.constexpr
         x = tl.load(x_ptr + off_yx, mask=mask_yx)
         z += tl.sum(x, axis=1)
     tl.store(z_ptr + off_y, z, mask=mask_y)
+    return
+
+def sum_spec(x: Float32[65, 200]) -> Float32[65,]:
+    return x.sum(1)
+
+
+@triton.jit
+def sum_kernel(x_ptr, z_ptr, N0, N1, T: tl.constexpr, B0: tl.constexpr, B1: tl.constexpr):
+    block_id_i = tl.program_id(0)
+    off_i = block_id_i * B0 + tl.arange(0, B0)
+    mask_i = off_i < N0
+    z = tl.zeros([B0], dtype=tl.float32)
+    for id_j in tl.range(0, T, B1):
+        off_j = id_j + tl.arange(0, B1)
+        off_ij = off_i[:, None] * T + off_j[None, :]
+        mask_j = off_j < T
+        mask_ij = mask_i[:, None] & mask_j[None, :]
+        x = tl.load(x_ptr + off_ij, mask=mask_ij)
+        z += tl.sum(x, axis=1)
+    tl.store(z_ptr + off_i, z, mask=mask_i)
     return
 
 
@@ -756,12 +776,24 @@ def run_puzzles(args, puzzles: List[int]):
         if not ok:
             return
     if 7 in puzzles:
+        print("Puzzle #7_1:")
+        ok_1 = test(
+            sum_kernel_1,
+            sum_spec_1,
+            B={"B0": 32, "B1": 32},
+            nelem={"N0": 200, "N1": 100, "T": 32},
+            print_log=print_log,
+            device=device,
+        )
+        print_end_line()
+        if not ok_1:
+            return
         print("Puzzle #7:")
         ok = test(
             sum_kernel,
             sum_spec,
             B={"B0": 32, "B1": 32},
-            nelem={"N0": 200, "N1": 100, "T": 32},
+            nelem={"N0": 65, "N1": 1, "T": 200},
             print_log=print_log,
             device=device,
         )
